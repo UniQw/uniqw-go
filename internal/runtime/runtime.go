@@ -59,66 +59,72 @@ type Runtime struct {
 
 // scheduleOneScript atomically moves one due item from delayed ZSET to pending LIST.
 // It returns the moved member on success, or false/nil if none moved.
-var scheduleOneScript = redis.NewScript(`
-local dkey = KEYS[1]
-local pkey = KEYS[2]
-local now  = ARGV[1]
-local items = redis.call('ZRANGEBYSCORE', dkey, '-inf', now, 'LIMIT', 0, 1)
-if #items == 0 then return false end
-local m = items[1]
-local rem = redis.call('ZREM', dkey, m)
-if rem == 1 then
-  redis.call('LPUSH', pkey, m)
-  return m
-end
-return false
-`)
+var scheduleOneScript = redis.NewScript(
+	// language=Lua
+	`
+	local dkey = KEYS[1]
+	local pkey = KEYS[2]
+	local now  = ARGV[1]
+	local items = redis.call('ZRANGEBYSCORE', dkey, '-inf', now, 'LIMIT', 0, 1)
+	if #items == 0 then return false end
+	local m = items[1]
+	local rem = redis.call('ZREM', dkey, m)
+	if rem == 1 then
+	  redis.call('LPUSH', pkey, m)
+	  return m
+	end
+	return false`,
+)
 
 // reclaimOneScript atomically reclaims one expired active item back to pending.
-var reclaimOneScript = redis.NewScript(`
-local akey = KEYS[1]
-local pkey = KEYS[2]
-local now  = ARGV[1]
-local items = redis.call('ZRANGEBYSCORE', akey, '-inf', now, 'LIMIT', 0, 1)
-if #items == 0 then return false end
-local m = items[1]
-local rem = redis.call('ZREM', akey, m)
-if rem == 1 then
-  redis.call('LPUSH', pkey, m)
-  return m
-end
-return false
-`)
+var reclaimOneScript = redis.NewScript(
+	// language=Lua
+	`
+	local akey = KEYS[1]
+	local pkey = KEYS[2]
+	local now  = ARGV[1]
+	local items = redis.call('ZRANGEBYSCORE', akey, '-inf', now, 'LIMIT', 0, 1)
+	if #items == 0 then return false end
+	local m = items[1]
+	local rem = redis.call('ZREM', akey, m)
+	if rem == 1 then
+	  redis.call('LPUSH', pkey, m)
+	  return m
+	end
+	return false`,
+)
 
 // expireOneScript atomically fails one expired job if it hasn't started yet.
 // It tries to remove from delayed or pending, then pushes to dead and removes from expiry.
-var expireOneScript = redis.NewScript(`
-local xkey = KEYS[1] -- expiry
-local dkey = KEYS[2] -- delayed
-local pkey = KEYS[3] -- pending
-local dekey = KEYS[4] -- dead
-local now  = ARGV[1]
-local items = redis.call('ZRANGEBYSCORE', xkey, '-inf', now, 'LIMIT', 0, 1)
-if #items == 0 then return false end
-local m = items[1]
--- try from delayed first
-local remd = redis.call('ZREM', dkey, m)
-if remd == 1 then
-  redis.call('LPUSH', dekey, m)
-  redis.call('ZREM', xkey, m)
-  return m
-end
--- try from pending list
-local remp = redis.call('LREM', pkey, 1, m)
-if remp > 0 then
-  redis.call('LPUSH', dekey, m)
-  redis.call('ZREM', xkey, m)
-  return m
-end
--- not in delayed/pending; remove from expiry to avoid spinning (likely already active or processed)
-redis.call('ZREM', xkey, m)
-return false
-`)
+var expireOneScript = redis.NewScript(
+	// language=Lua
+	`
+	local xkey = KEYS[1] -- expiry
+	local dkey = KEYS[2] -- delayed
+	local pkey = KEYS[3] -- pending
+	local dekey = KEYS[4] -- dead
+	local now  = ARGV[1]
+	local items = redis.call('ZRANGEBYSCORE', xkey, '-inf', now, 'LIMIT', 0, 1)
+	if #items == 0 then return false end
+	local m = items[1]
+	-- try from delayed first
+	local remd = redis.call('ZREM', dkey, m)
+	if remd == 1 then
+	  redis.call('LPUSH', dekey, m)
+	  redis.call('ZREM', xkey, m)
+	  return m
+	end
+	-- try from pending list
+	local remp = redis.call('LREM', pkey, 1, m)
+	if remp > 0 then
+	  redis.call('LPUSH', dekey, m)
+	  redis.call('ZREM', xkey, m)
+	  return m
+	end
+	-- not in delayed/pending; remove from expiry to avoid spinning (likely already active or processed)
+	redis.call('ZREM', xkey, m)
+	return false`,
+)
 
 // New creates a new background runtime that manages workers and maintenance routines.
 func New(rdb redis.UniversalClient, cfg Config, exec Executor) *Runtime {
