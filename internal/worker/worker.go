@@ -35,9 +35,6 @@ type taskRec struct {
 
 var taskPool = sync.Pool{New: func() any { return new(taskRec) }}
 
-// bytes buffer pool removed since sonic.Marshal returns []byte directly with
-// competitive allocation behavior.
-
 // Atomic dequeue script: RPOP from pending and ZADD into active with visibility score.
 var dequeueScript = redis.NewScript(
 	// language=Lua
