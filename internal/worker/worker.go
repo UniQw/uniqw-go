@@ -39,12 +39,15 @@ var taskPool = sync.Pool{New: func() any { return new(taskRec) }}
 // competitive allocation behavior.
 
 // Atomic dequeue script: RPOP from pending and ZADD into active with visibility score.
-var dequeueScript = redis.NewScript(`
-local v = redis.call('RPOP', KEYS[1])
-if not v then return false end
-redis.call('ZADD', KEYS[2], ARGV[1], v)
-return v
-`)
+var dequeueScript = redis.NewScript(
+	// language=Lua
+	`
+	local v = redis.call('RPOP', KEYS[1])
+	if not v then return false end
+	redis.call('ZADD', KEYS[2], ARGV[1], v)
+	return v
+	`,
+)
 
 // Recycle returns a taskRec to the pool to reduce allocations.
 func Recycle(t *taskRec) {
